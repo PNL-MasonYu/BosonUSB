@@ -31,6 +31,8 @@
 #include <stdio.h>
 #include <fcntl.h>               // open, O_RDWR
 #include <opencv2/opencv.hpp>
+#include <opencv2/imgcodecs.hpp> //
+#include <time.h>                // clock
 #include <unistd.h>              // close
 #include <sys/ioctl.h>           // ioctl
 #include <asm/types.h>           // videodev2.h
@@ -132,6 +134,8 @@ void print_help() {
 	printf(WHT "Press " YEL "'q' in video window " WHT " to quit\n");
 	printf("\n");
 }
+
+clock_t start = clock(); // start the clock
 
 /* ---------------------------- Main Function ---------------------------------------*/
 // ENTRY POINT
@@ -322,11 +326,11 @@ int main(int argc, char** argv )
 	}
 
 
-	// map fd+offset into a process location (kernel will decide due to our NULL). lenght and
+	// map fd+offset into a process location (kernel will decide due to our NULL). length and
 	// properties are also passed
 	printf(WHT ">>> Image width  =" YEL "%i" WHT "\n", width);
 	printf(WHT ">>> Image height =" YEL "%i" WHT "\n", height);
-	printf(WHT ">>> Buffer lenght=" YEL "%i" WHT "\n", bufferinfo.length);
+	printf(WHT ">>> Buffer length=" YEL "%i" WHT "\n", bufferinfo.length);
 
 	void * buffer_start = mmap(NULL, bufferinfo.length, PROT_READ | PROT_WRITE,MAP_SHARED, fd, bufferinfo.m.offset);
 
@@ -345,7 +349,7 @@ int main(int argc, char** argv )
 		exit(1);
 	}
 
-
+	printf(GRN ">>> Streaming Started\n" WHT);
 	// Declarations for RAW16 representation
         // Will be used in case we are reading RAW16 format
 	// Boson320 , Boson 640
@@ -370,6 +374,11 @@ int main(int argc, char** argv )
 	color_space = CV_8UC1;
  	Mat thermal_luma(luma_height, luma_width,  color_space, buffer_start);  // OpenCV input buffer
 	Mat thermal_rgb(height, width, CV_8UC3, 1);    // OpenCV output buffer , BGR -> Three color spaces (640 - 640 - 640 : p11 p21 p31 .... / p12 p22 p32 ..../ p13 p23 p33 ...)
+
+	printf(WHT ">>> Memory allocated\n");
+
+	int encodedImages[10000]; // array to contain encoded images
+	int fileNames[10000]; // array to contain file names
 
 	// Reaad frame, do AGC, paint frame
 	for (;;) {
@@ -405,9 +414,13 @@ int main(int argc, char** argv )
 
 	        	if (record_enable==1) {
         	        	sprintf(filename, "%s_raw16_%lu.tiff", thermal_sensor_name, frame);
-                		imwrite(filename, thermal16 , compression_params );
-                        	sprintf(filename, "%s_agc_%lu.tiff", thermal_sensor_name, frame);
-                        	imwrite(filename, thermal16_linear , compression_params );
+						fileNames[frame] = filename; // store file name
+						int TempBuf;
+						imencode('.tiff',thermal16,tempBuf); // encode image
+						encodedImages[frame] = tempBuf; // store encoded image
+                		// imwrite(filename, thermal16);
+                        	//sprintf(filename, "%s_agc_%lu.tiff", thermal_sensor_name, frame);
+                        	//imwrite(filename, thermal16_linear);
 				frame++;
                 	}
           	}
@@ -423,7 +436,7 @@ int main(int argc, char** argv )
 
 			if (record_enable==1) {
                         	sprintf(filename, "%s_yuv_%lu.tiff", thermal_sensor_name, frame);
-                        	imwrite(filename, thermal_rgb , compression_params );
+                        	imwrite(filename, thermal_rgb);
 				frame++;
                 	}
 
@@ -442,6 +455,14 @@ int main(int argc, char** argv )
 	}
 	// Finish Loop . Exiting.
 
+	clock_t end = clock(); // stop the clock
+	double cpu_time_used = ((double)(end - start))/CLOCKS_PER_SEC; // calculate real time elapsed during main()
+	double eff_frame_rate = cpu_time_used/frame;
+	printf("Effective Frame Rate: %f\n", eff_frame_rate);
+	for (int i=0; i<frame; i++) {
+		imwrite(fileNames[i],imdecode(encodedImages[i])); // decode, then write the file
+	}
+
 	// Deactivate streaming
 	if( ioctl(fd, VIDIOC_STREAMOFF, &type) < 0 ){
 		perror(RED "VIDIOC_STREAMOFF" WHT);
@@ -449,5 +470,6 @@ int main(int argc, char** argv )
 	};
 
 	close(fd);
+	printf(GRN ">>> Exit Success\n" WHT);
 	return EXIT_SUCCESS;
 }
